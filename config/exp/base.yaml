@@ -1,0 +1,72 @@
+# 기준 실험 설정
+#
+# 핵심 원칙: 중증도 "단계"는 데이터에 저장하지 않는다.
+# 데이터에는 원점수(MMSE 등)만 들어 있고, 단계 구분은 이 파일에서 만든다.
+# 나중에 MCI 데이터를 추가해 5단계로 가고 싶으면 severity_bins만 고치면 된다.
+
+name: base
+seed: 42
+
+# ---------- 데이터 ----------
+datasets:
+  - ds004504
+
+signal:
+  sfreq: 250            # 모든 데이터를 이 주파수로 리샘플
+  epoch_seconds: 4.0
+  epoch_overlap: 0.5    # 50% overlap
+  reference: average
+  normalize: robust_zscore   # 피험자별
+
+# 채널은 숫자로 박지 않는다. 데이터셋 조합의 교집합을 실행 시점에 계산한다.
+# channel_subset 을 주면 그 교집합에서 한 번 더 걸러낸다 (저채널 실험).
+channels:
+  subset: null          # null = 교집합 전체 사용
+  # subset: [Fp1, Fp2, F3, F4]    # 전두엽 4채널 실험
+
+# ---------- 라벨 ----------
+# 질환 분류: ds004504 의 Group(A/F/C) → 표준 코드
+disease_classes: [CN, AD, FTD]
+
+# 중증도 단계. ds004504 라벨 품질 분석 결과 3단계를 채택했다.
+#   - 대조군 MMSE 가 전원 정확히 30 (std=0) → 실측값이 아니라 만점 기록
+#   - MMSE 28, 29 구간에 피험자가 0명 → 상위 두 단계를 나눌 수 없음
+#   - 임상 기준 중증(<10)이 3명뿐 → 피험자 단위 5-fold 로 학습·평가 불가
+#
+# MCI 를 포함한 데이터셋을 추가하면 edges/labels 만 고쳐 5단계로 확장한다.
+#   edges:  [10, 20, 24, 28]
+#   labels: [severe, moderate, mild, at_risk, normal]
+severity_bins:
+  scale: MMSE
+  edges: [20, 28]                            # <20 | 20~27 | >=28
+  labels: [moderate_or_worse, mild, normal]
+
+# ---------- 모델 ----------
+model:
+  backbone: ShallowFBCSPNet    # EEGNet | SincShallowNet | ShallowFBCSPNet
+  embed_dim: 64
+  backbone_kwargs:
+    # 치매는 서파(delta/theta)가 핵심 지표다.
+    # filter_time_length 를 늘리면 저주파 분해능이 올라간다 (실험 축).
+    filter_time_length: 25     # 250Hz 기준 0.1초 → 분해능 10Hz
+    n_filters_time: 40
+    n_filters_spat: 40
+    drop_prob: 0.5
+
+loss:
+  severity_weight: 1.0         # L = L_disease + w * L_severity
+
+# ---------- 학습 ----------
+train:
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.0005
+  max_epochs: 100
+  early_stopping_patience: 15
+  device: auto                 # auto | cpu | cuda
+
+# ---------- 평가 ----------
+eval:
+  n_splits: 5
+  group_by: subject_id         # 반드시 피험자 단위. epoch 단위로 나누면 성능이 허위로 뜬다.
+  stratify_by: disease
