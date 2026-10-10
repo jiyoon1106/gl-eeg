@@ -1,0 +1,9 @@
+torch>=2.4
+torchaudio
+braindecode>=1.0
+mne>=1.6
+mne-bids
+scikit-learn
+pandas
+pyyaml
+openneuro-py

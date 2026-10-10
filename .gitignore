@@ -1,0 +1,14 @@
+data/
+*.npz
+*.npy
+*.set
+*.fdt
+*.edf
+*.mat
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+*.ckpt
+*.pth
