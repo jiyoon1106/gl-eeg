@@ -12,3 +12,5 @@ venv/
 .ipynb_checkpoints/
 *.ckpt
 *.pth
+
+*.tar.gz

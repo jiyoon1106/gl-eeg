@@ -1,0 +1,134 @@
+{
+  "exp": "base",
+  "model": "ShallowFBCSPNet",
+  "channels": [
+    "Fp1",
+    "Fp2",
+    "F7",
+    "F3",
+    "Fz",
+    "F4",
+    "F8",
+    "T3",
+    "C3",
+    "Cz",
+    "C4",
+    "T4",
+    "T5",
+    "P3",
+    "Pz",
+    "P4",
+    "T6",
+    "O1",
+    "O2"
+  ],
+  "n_channels": 19,
+  "npz": "/home/KNUEEhdd1/jjyoon1106/EEG/data/npz/base_derivatives.npz",
+  "config": {
+    "name": "base",
+    "seed": 42,
+    "datasets": [
+      "ds004504"
+    ],
+    "signal": {
+      "sfreq": 250,
+      "epoch_seconds": 4.0,
+      "epoch_overlap": 0.0,
+      "max_epochs_per_subject": 100,
+      "reference": "average",
+      "bandpass": null,
+      "normalize": "robust_zscore"
+    },
+    "channels": {
+      "subset": null
+    },
+    "disease_classes": [
+      "CN",
+      "AD",
+      "FTD"
+    ],
+    "severity_bins": {
+      "scale": "MMSE",
+      "edges": [
+        20,
+        28
+      ],
+      "labels": [
+        "moderate_or_worse",
+        "mild",
+        "normal"
+      ]
+    },
+    "model": {
+      "backbone": "ShallowFBCSPNet",
+      "embed_dim": 64,
+      "backbone_kwargs": {
+        "filter_time_length": 25,
+        "n_filters_time": 40,
+        "n_filters_spat": 40,
+        "drop_prob": 0.5
+      }
+    },
+    "loss": {
+      "severity_weight": 1.0
+    },
+    "train": {
+      "batch_size": 64,
+      "lr": 0.001,
+      "weight_decay": 0.0005,
+      "max_epochs": 100,
+      "early_stopping_patience": 15,
+      "device": "auto"
+    },
+    "eval": {
+      "n_splits": 5,
+      "group_by": "subject_id",
+      "stratify_by": "disease"
+    }
+  },
+  "data_meta": {
+    "exp": "base",
+    "source": "derivatives",
+    "channels": [
+      "Fp1",
+      "Fp2",
+      "F7",
+      "F3",
+      "Fz",
+      "F4",
+      "F8",
+      "T3",
+      "C3",
+      "Cz",
+      "C4",
+      "T4",
+      "T5",
+      "P3",
+      "Pz",
+      "P4",
+      "T6",
+      "O1",
+      "O2"
+    ],
+    "disease_classes": [
+      "CN",
+      "AD",
+      "FTD"
+    ],
+    "severity_bins": {
+      "scale": "MMSE",
+      "edges": [
+        20,
+        28
+      ],
+      "labels": [
+        "moderate_or_worse",
+        "mild",
+        "normal"
+      ]
+    },
+    "n_subjects": 88,
+    "skipped": [],
+    "built_at": "2026-10-10 23:19:06"
+  }
+}
