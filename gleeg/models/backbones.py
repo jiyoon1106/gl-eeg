@@ -15,7 +15,59 @@ import torch
 import torch.nn as nn
 
 # n_outputs 를 embed_dim 으로 주고 그 출력을 임베딩으로 쓴다.
-SUPPORTED = ("ShallowFBCSPNet", "EEGNetv4", "SincShallowNet", "EEGNeX", "Deep4Net", "FBCNet")
+SUPPORTED = ("ShallowFBCSPNet", "EEGNet", "SincShallowNet", "EEGNeX", "Deep4Net", "FBCNet")
+
+# Braindecode 버전에 따라 클래스 이름이 다르다 (1.0 이전 EEGNetv4 -> 이후 EEGNet).
+# 설치된 쪽을 실행 시점에 찾는다. 팀원 환경마다 버전이 다를 수 있기 때문이다.
+ALIASES: dict[str, tuple[str, ...]] = {
+    "EEGNet": ("EEGNet", "EEGNetv4"),
+    "EEGNetv4": ("EEGNetv4", "EEGNet"),
+}
+
+
+def _resolve(bdm, name: str) -> str:
+    for cand in ALIASES.get(name, (name,)):
+        if hasattr(bdm, cand):
+            return cand
+    raise ValueError(f"braindecode 에 {name!r} 이 없습니다. 후보: {SUPPORTED}")
+
+
+def accepted_kwargs(cls) -> set[str]:
+    """그 백본이 실제로 받는 인자 이름.
+
+    **kwargs 는 세지 않는다. EEGNet 은 **kwargs 를 받아놓고 모르는 인자가
+    오면 TypeError 를 내기 때문에, 이름이 명시된 인자만 통과시켜야 한다.
+    """
+    import inspect
+
+    params = inspect.signature(cls.__init__).parameters
+    return {
+        p.name
+        for p in params.values()
+        if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY) and p.name != "self"
+    }
+
+
+def filter_kwargs(cls, kwargs: dict, name: str = "", verbose: bool = True) -> dict:
+    """백본이 받지 않는 인자를 떼어낸다.
+
+    왜 필요한가
+    -----------
+    `backbone_kwargs` 는 백본마다 이름이 다르다. ShallowFBCSPNet 의
+    `filter_time_length` 는 EEGNet 에 없고(`kernel_length` 다), EEGNet 은
+    모르는 인자를 받으면 바로 TypeError 를 낸다. 백본을 바꿀 때마다 YAML 을
+    고쳐야 하면 저채널 스윕을 돌릴 수 없으므로, 받는 쪽에서 걸러낸다.
+
+    버린 인자는 반드시 출력한다 — 오타를 조용히 넘기면 설정이 무시된 채로
+    실험이 돌아가고, 그 결과를 나중에 비교할 수 없게 된다.
+    """
+    ok = accepted_kwargs(cls)
+    kept = {k: v for k, v in kwargs.items() if k in ok}
+    dropped = sorted(set(kwargs) - ok)
+    if dropped and verbose:
+        print(f"  [주의] {name} 이 받지 않는 인자를 무시합니다: {dropped}")
+        print(f"         (이 백본의 인자: {sorted(ok - {'n_chans', 'n_outputs', 'n_times'})})")
+    return kept
 
 
 def build_backbone(
@@ -23,22 +75,29 @@ def build_backbone(
     n_chans: int,
     n_times: int,
     embed_dim: int = 64,
+    sfreq: float | None = None,
+    strict_kwargs: bool = False,
     **kwargs,
 ) -> nn.Module:
-    """Braindecode 모델을 (B, C, T) -> (B, embed_dim) 모듈로 만든다."""
+    """Braindecode 모델을 (B, C, T) -> (B, embed_dim) 모듈로 만든다.
+
+    sfreq 는 주파수를 직접 다루는 백본에만 전달된다. SincShallowNet(학습되는
+    sinc 대역통과)과 FBCNet(필터뱅크)은 Hz 단위로 필터를 만들기 때문에
+    샘플링 주파수를 모르면 생성 자체가 안 된다.
+
+    strict_kwargs=True 면 백본이 받지 않는 인자가 있을 때 그냥 터뜨린다.
+    (단일 모델을 튜닝할 때는 이쪽이 안전하다)
+    """
     try:
         import braindecode.models as bdm
     except ImportError as e:  # pragma: no cover
         raise ImportError("braindecode 가 필요합니다: pip install braindecode") from e
 
-    # EEGNet 은 버전에 따라 이름이 다르다
-    alias = {"EEGNet": "EEGNetv4"}
-    name = alias.get(name, name)
-
-    if not hasattr(bdm, name):
-        raise ValueError(f"braindecode 에 {name!r} 이 없습니다. 후보: {SUPPORTED}")
-
-    cls = getattr(bdm, name)
+    cls = getattr(bdm, _resolve(bdm, name))
+    if sfreq is not None and "sfreq" not in kwargs and "sfreq" in accepted_kwargs(cls):
+        kwargs["sfreq"] = float(sfreq)
+    if not strict_kwargs:
+        kwargs = filter_kwargs(cls, kwargs, name=name)
     model = cls(n_chans=n_chans, n_outputs=embed_dim, n_times=n_times, **kwargs)
 
     # 출력 형태를 확인해 둔다 (백본마다 (B,D) / (B,D,1) 등으로 다르다)

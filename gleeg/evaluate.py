@@ -26,6 +26,8 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedGroupKFold
 
+IGNORE_LEVEL = -100   # losses.IGNORE 와 같은 값 (순환 import 방지용 복제)
+
 
 # ----------------------------------------------------------------------
 # 분할
@@ -71,6 +73,54 @@ def assert_no_leakage(
         raise AssertionError(
             f"피험자 누수! train 과 test 에 같은 피험자가 있습니다: {sorted(overlap)[:5]}"
         )
+
+
+# ----------------------------------------------------------------------
+# 피험자 단위 집계
+# ----------------------------------------------------------------------
+def pool_by_subject(
+    subject_ids: Sequence[str],
+    y_true: Sequence[int],
+    probs: np.ndarray,
+    level_true: Optional[Sequence[int]] = None,
+    level_pred: Optional[Sequence[int]] = None,
+) -> dict:
+    """epoch 단위 예측 -> 피험자 단위 예측.
+
+    왜 필요한가
+    -----------
+    모델은 4초 epoch 마다 예측하지만, 임상에서 판정 단위는 **사람**이다. 그리고
+    실제 표본 크기도 88명이지 8,776 epoch 이 아니다. epoch 단위 정확도만 보고
+    하면 표본이 100배 많은 것처럼 보여 신뢰구간이 비현실적으로 좁아진다.
+
+    질환은 확률 평균 후 argmax, 중증도는 예측 단계의 중앙값으로 모은다.
+    """
+    subject_ids = np.asarray(subject_ids)
+    y_true = np.asarray(y_true)
+    probs = np.asarray(probs)
+
+    subs = np.unique(subject_ids)
+    yt, yp, lt, lp = [], [], [], []
+    for s in subs:
+        m = subject_ids == s
+        yt.append(int(np.bincount(y_true[m]).argmax()))      # 라벨은 피험자 내 동일
+        yp.append(int(probs[m].mean(axis=0).argmax()))       # 확률 평균 -> argmax
+        if level_true is not None and level_pred is not None:
+            lt_m = np.asarray(level_true)[m]
+            lp_m = np.asarray(level_pred)[m]
+            valid = lt_m >= 0
+            if valid.any():
+                lt.append(int(np.median(lt_m[valid])))
+                lp.append(int(np.median(lp_m[valid])))
+            else:
+                lt.append(IGNORE_LEVEL)
+                lp.append(IGNORE_LEVEL)
+
+    out = {"subject_id": subs, "y_true": np.array(yt), "y_pred": np.array(yp)}
+    if lt:
+        out["level_true"] = np.array(lt)
+        out["level_pred"] = np.array(lp)
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -170,9 +220,13 @@ def aggregate_folds(fold_metrics: Sequence[dict]) -> dict:
     return out
 
 
-def format_report(agg: dict) -> str:
-    """사람이 읽을 요약 — 로그·발표용."""
-    lines = [f"=== {agg['n_folds']}-fold (피험자 단위) · 총 {agg['total_samples']} 샘플 ==="]
+def format_report(agg: dict, unit: str = "피험자 단위 분할") -> str:
+    """사람이 읽을 요약 — 로그·발표용.
+
+    unit 은 **집계 단위**를 적는다. 분할은 언제나 피험자 단위지만, 지표를
+    epoch 단위로 모았는지 피험자 단위로 모았는지는 구분해서 적어야 한다.
+    """
+    lines = [f"=== {agg['n_folds']}-fold · {unit} · 총 {agg['total_samples']} 샘플 ==="]
     order = [
         ("disease_acc", "질환 정확도"),
         ("disease_f1_macro", "질환 F1(macro)"),

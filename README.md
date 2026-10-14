@@ -32,11 +32,18 @@ gleeg/
     backbones.py        Braindecode 래핑 → 임베딩 추출기
     heads.py       ★②  출력 규격 (ModelOutput) + 멀티태스크 · CORAL 헤드
     losses.py           CORAL 손실 · 멀티태스크 가중합 · 증류 손실
+    baseline.py         밴드파워 + 부스팅 트리 (비교 기준점, 신경망 아님)
+  train/
+    loop.py             학습 루프 · 교차검증 (내부 val 분리 · 이중 집계)
   evaluate.py      ★③  피험자 단위 CV + MAE/QWK/민감도
 scripts/
   peek_labels.py        데이터 라벨 품질 분석 (받을 때마다 먼저 실행)
+  build_dataset.py      원본 → data.npz (어댑터 → 전처리 → epoch)
+  run_train.py          학습 실행 → results/<태그>/metrics.json
 tests/
   test_smoke.py         실제 데이터 없이 인터페이스 3종 검증
+  test_train.py         실제 데이터 없이 학습 루프 검증 (합성 신호)
+  test_pipeline.py      가짜 ds004504 로 원본→npz→학습 경로 전체 검증
 ```
 
 **★ 표시 세 개가 팀 작업이 붙는 접점이다.** 이 세 파일을 바꾸면 팀 전체 코드가
@@ -87,6 +94,29 @@ python -m scripts.peek_labels
 openneuro-py download --dataset=ds004504 --target-dir=data/ds004504
 ```
 
+### 학습
+
+```bash
+python -m scripts.build_dataset --exp base --source derivatives   # 1회 (약 1분)
+
+python -m scripts.run_train --model baseline                      # 비교 기준점
+python -m scripts.run_train --model ShallowFBCSPNet               # 주력
+python -m scripts.run_train --model EEGNet --channels frontal4    # 저채널
+```
+
+결과는 `results/<태그>/metrics.json` + `config.json` 에 쌓인다. 단계 수나
+채널 수가 바뀌면 지표를 직접 비교할 수 없으므로 설정을 함께 남긴다.
+
+**지표는 두 단위로 나온다.**
+
+| | 의미 |
+|---|---|
+| epoch 단위 | 4초 조각 하나하나를 맞췄는지. 샘플이 8,776개로 보인다 |
+| **피험자 단위** | 사람별 확률 평균 후 판정. **실제 표본은 88명** — 보고·발표는 이 수치로 |
+
+조기종료(early stopping)는 train 안에서 다시 떼어낸 val 로만 판단한다
+(`inner_val_split`). test 로 조기종료를 결정하면 그 test 성능은 쓸 수 없다.
+
 ---
 
 ## 데이터셋 라벨 품질 분석 (ds004504)
@@ -128,9 +158,18 @@ L = CE + w · CORAL
 | 모델 | 역할 | 담당 |
 |---|---|---|
 | `ShallowFBCSPNet` | 주력 백본 | A |
-| `EEGNetv4` | 저채널 스윕 · teacher-student 증류 | D |
+| `EEGNet` | 저채널 스윕 · teacher-student 증류 | D |
 | `SincShallowNet` | 학습된 주파수 대역 해석 | D/E |
-| 밴드파워 + XGBoost | 비교 기준점 (제출 모델 아님) | 공통 |
+| 밴드파워 + 부스팅 트리 | 비교 기준점 (제출 모델 아님) | 공통 |
+
+백본 이름은 Braindecode 버전에 따라 다르다(`EEGNet` ↔ `EEGNetv4`).
+`build_backbone()` 이 설치된 쪽을 실행 시점에 찾으므로 둘 다 받는다.
+
+**백본마다 인자 이름이 다르다.** ShallowFBCSPNet 의 `filter_time_length` 는
+EEGNet 에서 `kernel_length` 다. 모델별 인자는 `backbone_kwargs_by_model` 에
+적고, 거기 없으면 `build_backbone()` 이 그 백본이 받지 않는 인자를 걸러낸다
+(버린 인자는 로그에 찍는다 — 오타가 조용히 무시되면 안 되므로).
+`sfreq` 는 Hz 단위로 필터를 만드는 백본(SincShallowNet · FBCNet)에만 전달된다.
 
 ---
 

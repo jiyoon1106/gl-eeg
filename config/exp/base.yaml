@@ -12,11 +12,13 @@ datasets:
   - ds004504
 
 signal:
-  sfreq: 250            # 모든 데이터를 이 주파수로 리샘플
+  sfreq: 250                 # 500Hz 원본 -> 250Hz 리샘플 (신호가 50Hz 이하라 안전)
   epoch_seconds: 4.0
-  epoch_overlap: 0.5    # 50% overlap
-  reference: average
-  normalize: robust_zscore   # 피험자별
+  epoch_overlap: 0.0         # 겹침 없음. 겹쳐도 독립 정보는 안 늘어난다
+  max_epochs_per_subject: 100   # 599.8초면 150개까지 가능. 용량·균형 위해 100으로
+  reference: average         # 원본은 A1 A2 참조. 데이터셋 통합을 위해 통일
+  bandpass: null             # 원본에 0.4~50Hz 이미 적용됨
+  normalize: robust_zscore   # 피험자 전체 기준 채널별 median/IQR
 
 # 채널은 숫자로 박지 않는다. 데이터셋 조합의 교집합을 실행 시점에 계산한다.
 # channel_subset 을 주면 그 교집합에서 한 번 더 걸러낸다 (저채널 실험).
@@ -45,6 +47,8 @@ severity_bins:
 model:
   backbone: ShallowFBCSPNet    # EEGNet | SincShallowNet | ShallowFBCSPNet
   embed_dim: 64
+
+  # 주력 백본(ShallowFBCSPNet) 기준 인자.
   backbone_kwargs:
     # 치매는 서파(delta/theta)가 핵심 지표다.
     # filter_time_length 를 늘리면 저주파 분해능이 올라간다 (실험 축).
@@ -52,6 +56,20 @@ model:
     n_filters_time: 40
     n_filters_spat: 40
     drop_prob: 0.5
+
+  # 백본마다 인자 이름이 다르다. ShallowFBCSPNet 의 filter_time_length 는
+  # EEGNet 에서 kernel_length 다. 해당 항목이 있으면 위 설정을 대체한다.
+  backbone_kwargs_by_model:
+    EEGNet:
+      kernel_length: 64        # 250Hz 기준 0.256초 → 약 4Hz 까지 분해
+      F1: 8                    # 시간 필터 수
+      D: 2                     # 채널당 공간 필터 수
+      F2: 16                   # 분리 합성곱 출력
+      drop_prob: 0.25
+    SincShallowNet:
+      num_time_filters: 32
+      time_filter_len: 33
+      drop_prob: 0.5
 
 loss:
   severity_weight: 1.0         # L = L_disease + w * L_severity
